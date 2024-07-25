@@ -17,13 +17,13 @@ export class Networking extends Construct {
       subnetConfiguration: [
         {
           cidrMask: 24,
-          name: 'isolated',
-          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+          name: 'public',
+          subnetType: ec2.SubnetType.PUBLIC,
         },
         {
           cidrMask: 24,
-          name: 'public',
-          subnetType: ec2.SubnetType.PUBLIC,
+          name: 'isolated',
+          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
         },
       ],
     });
