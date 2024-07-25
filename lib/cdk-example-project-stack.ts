@@ -2,9 +2,12 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as rds from 'aws-cdk-lib/aws-rds';
+import * as ecsPatterns from 'aws-cdk-lib/aws-ecs-patterns';
+import { Networking } from './networking';
 
-export class CdkExampleProjectStack extends cdk.Stack {
+export class WordpressStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
@@ -15,16 +18,7 @@ export class CdkExampleProjectStack extends cdk.Stack {
       visibilityTimeout: cdk.Duration.seconds(300),
     });
 
-    const vpc = new ec2.Vpc(this, 'MyVpc', {
-      maxAzs: 2, // Default is all AZs in the region
-      subnetConfiguration: [
-        {
-          cidrMask: 24,
-          name: 'isolated',
-          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
-        },
-      ],
-    });
+    const network = new Networking(this, 'MyNetworking', { maxAzs: 2 });
 
     const database = new rds.DatabaseInstance(this, 'MyDatabase', {
       engine: rds.DatabaseInstanceEngine.mysql({
@@ -34,7 +28,7 @@ export class CdkExampleProjectStack extends cdk.Stack {
         ec2.InstanceClass.BURSTABLE3,
         ec2.InstanceSize.MICRO,
       ),
-      vpc,
+      vpc: network.vpc,
       allocatedStorage: 20, // Minimum storage
       maxAllocatedStorage: 100, // Allow for auto-scaling
       multiAz: false, // Single-AZ for cost savings
@@ -45,6 +39,46 @@ export class CdkExampleProjectStack extends cdk.Stack {
       backupRetention: cdk.Duration.days(7), // Adjust as needed
       deletionProtection: false, // Disable for development
       removalPolicy: cdk.RemovalPolicy.DESTROY, // Adjust as needed
+    });
+
+    // ECS Cluster
+    const cluster = new ecs.Cluster(this, 'MyCluster', {
+      vpc: network.vpc,
+    });
+
+    const loadBalancedFargateService =
+      new ecsPatterns.ApplicationLoadBalancedFargateService(
+        this,
+        'MyFargateService',
+        {
+          cluster,
+          memoryLimitMiB: 512,
+          cpu: 256,
+          taskImageOptions: {
+            image: ecs.ContainerImage.fromRegistry('amazon/amazon-ecs-sample'),
+          },
+          desiredCount: 1,
+          assignPublicIp: true,
+          taskSubnets: {
+            subnetType: ec2.SubnetType.PUBLIC,
+          },
+        },
+      );
+
+    // const scaling = loadBalancedFargateService.service.autoScaleTaskCount({
+    //   maxCapacity: 2,
+    // });
+    // scaling.scaleOnCpuUtilization('CpuScaling', {
+    //   targetUtilizationPercent: 50,
+    // });
+
+    // loadBalancedFargateService.targetGroup.configureHealthCheck({
+    //   path: '/',
+    //   interval: cdk.Duration.minutes(1),
+    // });
+
+    const loadBalancerDNS = new cdk.CfnOutput(this, 'LoadBalancerDNS', {
+      value: loadBalancedFargateService.loadBalancer.loadBalancerDnsName,
     });
   }
 }
