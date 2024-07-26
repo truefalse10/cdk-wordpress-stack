@@ -17,21 +17,22 @@ export class WordpressStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: WordpressStackProps) {
     super(scope, id, props);
 
-    const network = new Networking(this, 'MyNetworking', { maxAzs: 2 });
+    const network = new Networking(this, 'networking', { maxAzs: 2 });
 
-    const dbSecurityGroup = new ec2.SecurityGroup(this, 'DBSecurityGroup', {
+    const dbSecurityGroup = new ec2.SecurityGroup(this, 'sg-db', {
       vpc: network.vpc,
       allowAllOutbound: true,
     });
 
-    const database = new rds.DatabaseInstance(this, 'MyDatabase', {
+    const database = new rds.DatabaseInstance(this, 'db-mysql', {
       engine: rds.DatabaseInstanceEngine.mysql({
-        version: rds.MysqlEngineVersion.VER_8_0_37,
+        version: rds.MysqlEngineVersion.VER_5_7, // lets use 5.7,  same as in docker compose test
       }),
       instanceType: ec2.InstanceType.of(
         ec2.InstanceClass.BURSTABLE3,
         ec2.InstanceSize.MICRO,
       ),
+      databaseName: 'wordpress',
       vpc: network.vpc,
       allocatedStorage: 20, // Minimum storage
       maxAllocatedStorage: 100, // Allow for auto-scaling
@@ -47,14 +48,15 @@ export class WordpressStack extends cdk.Stack {
     });
 
     // ECS Cluster
-    const cluster = new ecs.Cluster(this, 'MyCluster', {
+    const cluster = new ecs.Cluster(this, 'ecs-cluster', {
       vpc: network.vpc,
+      containerInsights: true,
     });
 
     const loadBalancedFargateService =
       new ecsPatterns.ApplicationLoadBalancedFargateService(
         this,
-        'MyFargateService',
+        'fargate-service',
         {
           cluster,
           memoryLimitMiB: 512, // 0.5 GB
@@ -92,27 +94,17 @@ export class WordpressStack extends cdk.Stack {
         },
       );
 
+    loadBalancedFargateService.targetGroup.healthCheck = {
+      path: '/wp-includes/images/blank.gif',
+      interval: cdk.Duration.minutes(1),
+    };
+
     dbSecurityGroup.addIngressRule(
       loadBalancedFargateService.service.connections.securityGroups[0],
       ec2.Port.tcp(3306),
       'Allow MySQL traffic from Fargate service',
     );
 
-    loadBalancedFargateService.targetGroup.healthCheck = {
-      path: '/wp-includes/images/blank.gif',
-      interval: cdk.Duration.minutes(1),
-    };
-
-    // database.connections.allowFrom(
-    //   loadBalancedFargateService.cluster.connections,
-    //   ec2.Port.tcp(3306),
-    // );
-
-    loadBalancedFargateService.node.addDependency(database); // Ensure database is created first
-
-    loadBalancedFargateService.targetGroup.configureHealthCheck({
-      path: '/wp-includes/images/blank.gif',
-      interval: cdk.Duration.minutes(1),
-    });
+    // loadBalancedFargateService.node.addDependency(database); // Ensure database is created first
   }
 }

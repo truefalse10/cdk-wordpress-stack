@@ -11,7 +11,7 @@ export class Networking extends Construct {
 
   constructor(scope: Construct, id: string, props: NetworkingProps) {
     super(scope, id);
-    this.vpc = new ec2.Vpc(this, 'MyVpc', {
+    this.vpc = new ec2.Vpc(this, 'vpc', {
       ipAddresses: ec2.IpAddresses.cidr('10.0.0.0/16'),
       maxAzs: props.maxAzs,
       subnetConfiguration: [

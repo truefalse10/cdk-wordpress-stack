@@ -4,7 +4,7 @@ import * as cdk from 'aws-cdk-lib';
 import { WordpressStack } from '../lib/wordpress-stack';
 
 const app = new cdk.App();
-new WordpressStack(app, 'WordpressStack', {
+new WordpressStack(app, 'wordpress-stack', {
   /* If you don't specify 'env', this stack will be environment-agnostic.
    * Account/Region-dependent features and context lookups will not work,
    * but a single synthesized template can be deployed anywhere. */
@@ -15,7 +15,7 @@ new WordpressStack(app, 'WordpressStack', {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION,
   },
-  WORDPRESS_IMAGE: 'wordpress:6',
+  WORDPRESS_IMAGE: 'wordpress:6.6',
   DEBUG_MODE: true,
 
   /* Uncomment the next line if you know exactly what Account and Region you
