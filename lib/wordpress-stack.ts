@@ -8,18 +8,21 @@ import * as ecsPatterns from 'aws-cdk-lib/aws-ecs-patterns';
 import * as efs from 'aws-cdk-lib/aws-efs';
 import { Networking } from './networking';
 
+interface WordpressStackProps extends cdk.StackProps {
+  DEBUG_MODE: boolean;
+  WORDPRESS_IMAGE: string;
+}
+
 export class WordpressStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  constructor(scope: Construct, id: string, props?: WordpressStackProps) {
     super(scope, id, props);
 
-    // The code that defines your stack goes here
-
-    // example resource
-    const queue = new sqs.Queue(this, 'CdkExampleProjectQueue', {
-      visibilityTimeout: cdk.Duration.seconds(300),
-    });
-
     const network = new Networking(this, 'MyNetworking', { maxAzs: 2 });
+
+    const dbSecurityGroup = new ec2.SecurityGroup(this, 'DBSecurityGroup', {
+      vpc: network.vpc,
+      allowAllOutbound: true,
+    });
 
     const database = new rds.DatabaseInstance(this, 'MyDatabase', {
       engine: rds.DatabaseInstanceEngine.mysql({
@@ -40,23 +43,12 @@ export class WordpressStack extends cdk.Stack {
       backupRetention: cdk.Duration.days(7), // Adjust as needed
       deletionProtection: false, // Disable for development
       removalPolicy: cdk.RemovalPolicy.DESTROY, // Adjust as needed
+      securityGroups: [dbSecurityGroup],
     });
 
     // ECS Cluster
     const cluster = new ecs.Cluster(this, 'MyCluster', {
       vpc: network.vpc,
-    });
-
-    const autoScalingGroup = cluster.addCapacity('ASG', {
-      instanceType: ec2.InstanceType.of(
-        ec2.InstanceClass.T3A,
-        ec2.InstanceSize.SMALL,
-      ),
-      maxCapacity: 3,
-      machineImage: ecs.EcsOptimizedImage.amazonLinux2(),
-    });
-    autoScalingGroup.scaleOnCpuUtilization('KeepCpuHalfwayLoaded', {
-      targetUtilizationPercent: 50,
     });
 
     const loadBalancedFargateService =
@@ -68,10 +60,12 @@ export class WordpressStack extends cdk.Stack {
           memoryLimitMiB: 512, // 0.5 GB
           cpu: 256, // 0.5 vCPU
           taskImageOptions: {
-            image: ecs.ContainerImage.fromRegistry('wordpress:6-fpm'),
+            image: ecs.ContainerImage.fromRegistry(
+              props?.WORDPRESS_IMAGE ?? 'wordpress:6',
+            ),
             environment: {
               WORDPRESS_DB_NAME: 'wordpress',
-              WORDPRESS_DEBUG: '1',
+              WORDPRESS_DEBUG: props?.DEBUG_MODE ? '1' : '0',
             },
             secrets: {
               WORDPRESS_DB_HOST: ecs.Secret.fromSecretsManager(
@@ -92,62 +86,33 @@ export class WordpressStack extends cdk.Stack {
           desiredCount: 1,
           assignPublicIp: true,
           taskSubnets: {
-            subnetType: ec2.SubnetType.PUBLIC,
+            subnetType: ec2.SubnetType.PUBLIC, // if we put this into a private subnet it can not fetch aws secrets and container images
           },
+          publicLoadBalancer: true,
         },
       );
+
+    dbSecurityGroup.addIngressRule(
+      loadBalancedFargateService.service.connections.securityGroups[0],
+      ec2.Port.tcp(3306),
+      'Allow MySQL traffic from Fargate service',
+    );
 
     loadBalancedFargateService.targetGroup.healthCheck = {
       path: '/wp-includes/images/blank.gif',
       interval: cdk.Duration.minutes(1),
     };
 
-    database.connections.allowFrom(
-      loadBalancedFargateService.cluster.connections,
-      ec2.Port.tcp(3306),
-    );
+    // database.connections.allowFrom(
+    //   loadBalancedFargateService.cluster.connections,
+    //   ec2.Port.tcp(3306),
+    // );
 
     loadBalancedFargateService.node.addDependency(database); // Ensure database is created first
 
-    const scaling = loadBalancedFargateService.service.autoScaleTaskCount({
-      maxCapacity: 3,
-    });
-    scaling.scaleOnCpuUtilization('CpuScaling', {
-      targetUtilizationPercent: 50,
-    });
-
     loadBalancedFargateService.targetGroup.configureHealthCheck({
-      path: '/',
+      path: '/wp-includes/images/blank.gif',
       interval: cdk.Duration.minutes(1),
     });
-
-    const fileSystem = new efs.FileSystem(this, 'FileSystem', {
-      vpc: network.vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
-      encrypted: true,
-    });
-
-    fileSystem.node.addDependency(cluster);
-
-    fileSystem.connections.allowFrom(
-      autoScalingGroup.connections.connections,
-      ec2.Port.tcp(2049),
-    );
-
-    const volumeName = 'efs';
-    // volume can not be reached from the task definition ??
-    // loadBalancedFargateService.taskDefinition.addVolume({
-    //   name: volumeName,
-    //   efsVolumeConfiguration: {
-    //     fileSystemId: fileSystem.fileSystemId,
-
-    //   },
-    // });
-
-    // loadBalancedFargateService.taskDefinition.defaultContainer?.addMountPoints({
-    //   containerPath: '/var/www/html',
-    //   readOnly: false,
-    //   sourceVolume: volumeName,
-    // });
   }
 }

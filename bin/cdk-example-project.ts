@@ -15,6 +15,8 @@ new WordpressStack(app, 'WordpressStack', {
     account: process.env.CDK_DEFAULT_ACCOUNT,
     region: process.env.CDK_DEFAULT_REGION,
   },
+  WORDPRESS_IMAGE: 'wordpress:6',
+  DEBUG_MODE: true,
 
   /* Uncomment the next line if you know exactly what Account and Region you
    * want to deploy the stack to. */
